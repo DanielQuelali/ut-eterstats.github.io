@@ -1,0 +1,382 @@
+---
+title: "Urban Terror - Stats"
+author: by Aloe Vera @
+output: 
+  flexdashboard::flex_dashboard:
+    storyboard: true
+    source_code: true
+    social: menu
+    theme: cerulean
+---
+
+```{r, include=FALSE}
+library(Rcpp)
+library(flexdashboard)
+library(DT)
+library(jsonlite)
+library(RSQLite)
+library(plotly)
+library(dplyr)
+library(tidyr)
+library(purrr)
+# library(formattable)
+library(forcats)
+library(heatmaply)
+```
+
+```{r}
+conn_ut4 <- dbConnect(drv = RSQLite::SQLite(), dbname = "./data/data.sqlite")
+```
+
+```{r}
+df_players <- dbGetQuery(conn_ut4, statement = "SELECT * FROM player")
+```
+
+```{r}
+df_stats <- dbGetQuery(conn_ut4, statement = "SELECT * FROM xlrstats")
+```
+
+```{r}
+dbDisconnect(conn_ut4)
+```
+
+```{r}
+players_dict <- setNames(df_players$name, df_players$guid)
+```
+
+```{r}
+events_log <- "./data/devel.log"
+```
+
+```{r, include=FALSE}
+raw_events <- stream_in(file(events_log))
+```
+
+```{r}
+options(digits.secs = 3)
+
+df_all_raw_events <- raw_events %>%
+  jsonlite::flatten() %>%
+  as_data_frame() %>%
+  mutate_at("asctime", ~stringr::str_replace(string = .x, ",", ".")) %>%
+  mutate_at("asctime", ~as.POSIXct(., format = "%Y-%m-%d %H:%M:%OS"))
+```
+
+```{r}
+df_rounds <- df_all_raw_events %>%
+  filter(grepl("Init", message)) %>%
+  mutate(
+    round_end_time = lead(asctime),
+    round_duration = as.numeric(round_end_time - asctime, unit = "secs")
+  ) %>%
+  select(
+    asctime,
+    round_end_time,
+    round_duration
+  ) %>%
+  filter(
+    round_duration > 5 * 60,
+    lubridate::hour(asctime) < 14
+  )
+
+the_good_starttime <- df_rounds %>%
+  pull(asctime) %>%
+  # Busco la anteúltima ronda
+  nth(-2)
+
+the_good_endtime <- df_rounds %>%
+  pull(round_end_time) %>%
+  last()
+```
+
+```{r}
+df_raw_events <- df_all_raw_events %>%
+  filter(
+    asctime %>% between(the_good_starttime, the_good_endtime)
+  )
+```
+
+```{r}
+df_killers <- df_raw_events %>%
+  filter(event_type == 'kill') %>%
+  filter(event_properties.killer != 'NONE') %>%
+  # filter(asctime > '2017-12-19 13:29:40') %>%
+  count(event_properties.killer, event_properties.victim)
+```
+
+```{r}
+df_knife_kills <- df_raw_events %>%
+  mutate(
+    round = cumsum(grepl("InitRound", message))
+  ) %>%
+  group_by(round) %>%
+  mutate(
+    round_time = asctime - first(asctime)
+  ) %>%
+  filter(max(round_time) > 5 * 60) %>%
+  ungroup() %>%
+  mutate(
+    round = dense_rank(round)
+  ) %>%
+  filter(
+    event_properties.death_cause == 'UT_MOD_KNIFE'
+  ) %>%
+  mutate(
+    killer = map_chr(event_properties.killer, ~players_dict[.x]),
+    victim = map_chr(event_properties.victim, ~players_dict[.x])
+  ) %>%
+  select(
+    round,
+    round_time,
+    killer,
+    victim
+  ) %>%
+  mutate(
+    round_time = paste0(as.numeric(round_time) %/% 60, "m", trunc(as.numeric(round_time)) %% 60, "s")
+  )
+```
+
+```{r}
+df_kills <- df_killers %>%
+  group_by(event_properties.killer) %>%
+  summarise(
+    kills = sum(n)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    player = map_chr(event_properties.killer, ~players_dict[.x])
+  ) %>%
+  select(player, kills) %>%
+  arrange(-kills)
+```
+
+```{r}
+df_deaths <- df_killers %>%
+  group_by(event_properties.victim) %>%
+  summarise(
+    deaths = sum(n)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    player = map_chr(event_properties.victim, ~players_dict[.x])
+  ) %>%
+  select(player, deaths) %>%
+  arrange(-deaths)
+```
+
+### <strong>Flag Stats</strong>
+
+```{r}
+df_killers %>%
+  distinct(event_properties.killer) %>%
+  full_join(
+    df_raw_events %>%
+      filter(grepl("flag", event_type), event_type != 'flag_capture_time') %>%
+      count(event_type, event_properties.player) %>%
+      ungroup(),
+    by = c("event_properties.killer" = "event_properties.player")
+  ) %>%
+  complete(event_type, event_properties.killer, fill = list(n = 0L)) %>%
+  mutate(
+    player = map_chr(event_properties.killer, ~players_dict[.x])
+  ) %>%
+  select(-event_properties.killer) %>%
+  spread(
+    key = event_type,
+    value = n
+  ) %>%
+  mutate(
+    banderas_enemigas_tocadas = flag_dropped + flag_captured
+  ) %>%
+  rename(
+    banderas_capturadas = flag_captured,
+    banderas_droppeadas = flag_dropped,
+    banderas_recuperadas = flag_returned
+  ) %>%
+  mutate(
+    total_banderas_tocadas = banderas_enemigas_tocadas + banderas_recuperadas
+  ) %>%
+  arrange(-banderas_capturadas, -total_banderas_tocadas) %>%
+  
+  DT::datatable(
+    # rownames = FALSE,
+    options = list(
+      paging = FALSE
+    )
+  )
+```
+
+### <strong>Kills-Deaths Ratio</strong>
+
+```{r}
+full_join(
+  df_kills,
+  df_deaths,
+  by = "player"
+) %>%
+  mutate(
+    kd_ratio = round(kills / deaths, 2)
+  ) %>%
+  arrange(-kd_ratio) %>%
+  
+  DT::datatable(
+    # rownames = FALSE,
+    options = list(
+      paging = FALSE
+    )
+  )
+```
+
+### <strong>Most kills</strong>
+
+```{r}
+df_killers %>%
+  full_join(
+    df_killers,
+    by = c("event_properties.victim" = "event_properties.killer", "event_properties.killer" = "event_properties.victim")
+  ) %>%
+  mutate(
+    kills = coalesce(n.x, 0L),
+    deaths = coalesce(n.y, 0L),
+    balance = kills - deaths
+  ) %>%
+  mutate(
+    killer = map_chr(event_properties.killer, ~players_dict[.x]),
+    victim = map_chr(event_properties.victim, ~players_dict[.x])
+  ) %>%
+  select(
+    killer,
+    victim,
+    kills,
+    victim_kills = deaths,
+    balance
+  ) %>%
+  arrange(-balance) %>%
+  group_by(killer) %>%
+  filter(row_number() == 1) %>%
+  ungroup() %>%
+
+  DT::datatable(
+    # rownames = FALSE,
+    options = list(
+      paging = FALSE
+    )
+  )
+```
+
+### <strong>Most deaths</strong>
+
+```{r}
+df_killers %>%
+  full_join(
+    df_killers,
+    by = c("event_properties.victim" = "event_properties.killer", "event_properties.killer" = "event_properties.victim")
+  ) %>%
+  mutate(
+    kills = coalesce(n.x, 0L),
+    deaths = coalesce(n.y, 0L),
+    balance = kills - deaths
+  ) %>%
+  mutate(
+    killer = map_chr(event_properties.killer, ~players_dict[.x]),
+    victim = map_chr(event_properties.victim, ~players_dict[.x])
+  ) %>%
+  select(
+    killer,
+    victim,
+    kills,
+    victim_kills = deaths,
+    balance
+  ) %>%
+  arrange(balance) %>%
+  group_by(killer) %>%
+  filter(row_number() == 1) %>%
+  ungroup() %>%
+  
+  DT::datatable(
+    # rownames = FALSE,
+    options = list(
+      paging = FALSE
+    )
+  )
+```
+
+### <strong>Kills heatmap</strong>
+
+```{r}
+df_killers %>%
+  full_join(
+    df_killers,
+    by = c("event_properties.victim" = "event_properties.killer", "event_properties.killer" = "event_properties.victim")
+  ) %>%
+  mutate(
+    # kills = coalesce(n.x, 0L),
+    # deaths = coalesce(n.y, 0L),
+    kills = n.x,
+    deaths = n.y,
+    balance = kills - deaths
+  ) %>%
+  mutate(
+    killer = map_chr(event_properties.killer, ~players_dict[.x]),
+    victim = map_chr(event_properties.victim, ~players_dict[.x])
+  ) %>%
+  select(
+    killer,
+    victim,
+    kills
+  ) %>%
+  spread(victim, kills) %>%
+  {
+    my_row_names <- pull(., killer)
+    m <- as.matrix(select(., -killer))
+
+    rownames(m) <- my_row_names
+
+    m[is.na(m)] <- 0
+
+    heatmaply(
+      m,
+      xlab = 'victims', ylab = 'killers',
+      k_col = 2, k_row = 2,
+      colors = viridis::inferno,
+      seriate = "GW"
+      # plot_method = "plotly",
+      # row_dend_left = TRUE,
+      # margins = c(120, 0, 0, NA)
+    )
+  }
+```
+
+### <strong>Knife Kills</strong>
+
+```{r}
+df_knife_kills %>%
+  
+  DT::datatable(
+    rownames = FALSE,
+    options = list(
+      paging = FALSE
+    )
+  )
+```
+
+### <strong>Stats Globales (TEMP)</strong><br>Por el momento, incluye el warmup. En un futuro, sólo va a contar "el bueno". 
+
+```{r}
+df_stats %>%
+  arrange(-ratio) %>%
+  mutate(
+    rank = row_number(),
+    hs_kill = round(headshots / kills, 2)
+  ) %>%
+  select(rank, name, kills, deaths, headshots, ratio, max_kill_streak, hs_kill)  %>%
+  
+  DT::datatable(
+    rownames = FALSE,
+    options = list(
+      paging = FALSE
+    )
+  )
+```
+
+
