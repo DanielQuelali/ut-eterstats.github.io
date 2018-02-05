@@ -4,7 +4,7 @@ author: by Aloe Vera @
 output: 
   flexdashboard::flex_dashboard:
     storyboard: true
-    source_code: true
+    source_code: https://github.com/ut-eterstats/ut-eterstats.github.io
     social: menu
     theme: cerulean
 ---
@@ -12,16 +12,19 @@ output:
 ```{r, include=FALSE}
 library(Rcpp)
 library(flexdashboard)
-library(DT)
 library(jsonlite)
 library(RSQLite)
 library(plotly)
 library(dplyr)
 library(tidyr)
 library(purrr)
-# library(formattable)
+library(formattable)
 library(forcats)
 library(heatmaply)
+library(stringr)
+library(lubridate)
+library(DT)
+library(knitr)
 ```
 
 ```{r}
@@ -48,6 +51,10 @@ players_dict <- setNames(df_players$name, df_players$guid)
 events_log <- "./data/devel.log"
 ```
 
+```{r}
+# events_log <- "/opt/spunkybot/devel.log.2018-01-19"
+```
+
 ```{r, include=FALSE}
 raw_events <- stream_in(file(events_log))
 ```
@@ -63,61 +70,202 @@ df_all_raw_events <- raw_events %>%
 ```
 
 ```{r}
-df_rounds <- df_all_raw_events %>%
-  filter(grepl("Init", message)) %>%
+df_all_rounds <- df_all_raw_events %>%
+  
+  # BUG: No se setea correctamente el nombre del mapa.
+  # mutate(
+  #   map = str_extract(message, "(?<=Current map: )\\w+")
+  # ) %>%
+  # fill(map) %>%
+  
   mutate(
-    round_end_time = lead(asctime),
-    round_duration = as.numeric(round_end_time - asctime, unit = "secs")
+    round = cumsum(grepl("Init", message))
   ) %>%
-  select(
-    asctime,
-    round_end_time,
-    round_duration
+  group_by(round) %>%
+  mutate(
+    round_time = asctime - first(asctime)
   ) %>%
-  filter(
-    round_duration > 5 * 60,
-    lubridate::hour(asctime) < 14
-  )
-
-the_good_starttime <- df_rounds %>%
-  pull(asctime) %>%
-  # Busco la anteúltima ronda
-  nth(-2)
-
-the_good_endtime <- df_rounds %>%
-  pull(round_end_time) %>%
-  last()
+  ungroup()
 ```
 
 ```{r}
-df_raw_events <- df_all_raw_events %>%
+df_all_rounds_team <- df_all_rounds %>%
+  mutate(
+    event_id = row_number()
+  ) %>%
+  # filter(grepl("Client", message)) %>%
+  mutate(
+    player_id = str_extract(message, "(?<=Player )\\d+"),
+    player_guid = str_extract(message, "(?<=guid )\\w+")
+  ) %>%
+  group_by(
+    player_id
+  ) %>%
+  fill(player_guid) %>%
+  ungroup() %>%
+  arrange(
+    event_id
+  ) %>%
+  mutate(
+    event_type = if_else(grepl("ClientBegin", message), "player_entered", event_type),
+    event_properties.player = coalesce(event_properties.player, player_guid)
+  ) %>%
+  # select(event_id, asctime, message, event_type, event_properties.player, round, round_time) %>%
+  group_by(
+    event_properties.player
+  ) %>%
+  mutate(
+    player_session_id = cumsum(grepl("ClientBegin", message)),
+    player_team = str_extract(message, "(?<=team )\\w+")
+  ) %>%
+  fill(player_team) %>%
+  ungroup() %>%
+  arrange(event_id)
+```
+
+```{r}
+df_raw_events <- df_all_rounds_team %>%
+  
+  # Traer sólo las rondas que:
+  group_by(round) %>%
   filter(
-    asctime %>% between(the_good_starttime, the_good_endtime)
+    # - hayan durado más de 5 minutos.
+    max(round_time) > 5 * 60,
+    
+    # - hayan arrancado antes de las 14hs
+    lubridate::hour(min(asctime)) < 14,
+    
+    # - sean CTF
+    any(grepl("flag", event_type))
+  ) %>%
+  ungroup() %>%
+  
+  # De esas rondas, traemos las dos últimas
+  filter(round >= nth(unique(round), -2)) %>%
+  
+  # Renombramos las rondas
+  mutate(
+    round = dense_rank(round)
   )
+```
+
+```{r}
+stats_mode <- . %>% {
+  a <- unique(.)
+
+  match(., a) %>%
+    tabulate %>%
+    which.max %>%
+    a[.]
+}
+```
+
+```{r}
+df_flags_won <- df_raw_events %>%
+  filter(event_type == 'flag_captured') %>%
+  select(asctime, capturing_team = player_team)
+
+df_sessions <- df_all_rounds_team %>%
+  group_by(
+    event_properties.player,
+    player_session_id
+  ) %>%
+  summarise(
+    player_team = stats_mode(player_team),
+    session_start = min(asctime),
+    session_end = asctime[if_else(any(grepl("ClientDisconnect", message)), which.max(grepl("ClientDisconnect", message)), NA_integer_)]
+  ) %>%
+  mutate(
+    session_end = coalesce(session_end, lead(session_start))
+  ) %>%
+  ungroup() %>%
+  mutate(
+    session_end = coalesce(session_end, max(session_end, na.rm = TRUE))
+    ,
+    flags_won = list(player_team, session_start, session_end) %>%
+      pmap_int(
+        ~filter(
+          df_flags_won,
+          capturing_team == ..1,
+          asctime >= ..2,
+          asctime < ..3
+        ) %>%
+          NROW()
+      ),
+    flags_lost = list(player_team, session_start, session_end) %>%
+      pmap_int(
+        ~filter(
+          df_flags_won,
+          capturing_team != ..1,
+          asctime >= ..2,
+          asctime < ..3
+        ) %>%
+          NROW()
+      )
+  )
+```
+
+```{r}
+df_valid_rounds <- df_raw_events %>%
+  group_by(
+    round
+  ) %>%
+  summarise(
+    round_start = min(asctime),
+    round_end = asctime[if_else(any(grepl("Exit", message)), which.max(grepl("Exit", message)), NA_integer_)]
+  ) %>%
+  mutate(
+    round_end = coalesce(round_end, lead(round_start))
+  ) %>%
+  ungroup()
+```
+
+```{r}
+rounds_interval <- lubridate::interval(df_valid_rounds$round_start, df_valid_rounds$round_end)
+
+df_time_played <- df_sessions %>%
+  mutate(
+    session_interval = lubridate::interval(session_start, session_end),
+    round_1_time_played = lubridate::intersect(rounds_interval[1], session_interval) %>% as.period(unit = "seconds") %>% second(),
+    round_2_time_played = lubridate::intersect(rounds_interval[2], session_interval) %>% as.period(unit = "seconds") %>% second()
+  ) %>%
+  filter(player_session_id > 0) %>%
+  # mutate(
+  #   session_interval = lubridate::interval(session_start, session_end)
+  # ) %>%
+  group_by(
+    event_properties.player
+  ) %>%
+  summarise_at(
+    vars(starts_with("round"), flags_won, flags_lost),
+    sum,
+    na.rm = TRUE
+  ) %>%
+  ungroup() %>%
+  mutate(
+    total_time_played = round_1_time_played + round_2_time_played,
+    player = map_chr(event_properties.player, ~players_dict[.x])
+  ) %>%
+  select(
+    player,
+    round_1_time_played,
+    round_2_time_played,
+    total_time_played,
+    flags_won,
+    flags_lost
+  ) %>%
+  arrange(-total_time_played)
 ```
 
 ```{r}
 df_killers <- df_raw_events %>%
   filter(event_type == 'kill') %>%
   filter(event_properties.killer != 'NONE') %>%
-  # filter(asctime > '2017-12-19 13:29:40') %>%
   count(event_properties.killer, event_properties.victim)
 ```
 
 ```{r}
 df_knife_kills <- df_raw_events %>%
-  mutate(
-    round = cumsum(grepl("InitRound", message))
-  ) %>%
-  group_by(round) %>%
-  mutate(
-    round_time = asctime - first(asctime)
-  ) %>%
-  filter(max(round_time) > 5 * 60) %>%
-  ungroup() %>%
-  mutate(
-    round = dense_rank(round)
-  ) %>%
   filter(
     event_properties.death_cause == 'UT_MOD_KNIFE'
   ) %>%
@@ -137,7 +285,15 @@ df_knife_kills <- df_raw_events %>%
 ```
 
 ```{r}
-df_kills <- df_killers %>%
+df_kills <- df_raw_events %>%
+  filter(event_type == 'kill') %>%
+  filter(event_properties.killer != 'NONE') %>%
+  
+  # No contar team kills
+  filter(!event_properties.team_kill) %>%
+
+  count(event_properties.killer, event_properties.victim) %>%
+  
   group_by(event_properties.killer) %>%
   summarise(
     kills = sum(n)
@@ -164,7 +320,7 @@ df_deaths <- df_killers %>%
   arrange(-deaths)
 ```
 
-### <strong>Flag Stats</strong>
+### <strong>Flag Stats</strong><br/>Map: ut4_riyadh
 
 ```{r}
 df_killers %>%
@@ -197,16 +353,44 @@ df_killers %>%
     total_banderas_tocadas = banderas_enemigas_tocadas + banderas_recuperadas
   ) %>%
   arrange(-banderas_capturadas, -total_banderas_tocadas) %>%
-  
+
   DT::datatable(
     # rownames = FALSE,
+    class = 'row-border hover',
     options = list(
       paging = FALSE
+      ,
+      columnDefs = list(list(className = 'dt-left dt-head-left', targets = "_all"))
     )
   )
 ```
 
-### <strong>Kills-Deaths Ratio</strong>
+```{r}
+df_raw_events
+```
+
+### <strong>Kills Stats</strong>
+
+```{r}
+left_color_bar <- function (color = "lightgray", fun = "proportion", ...) 
+{
+  fun <- match.fun(fun)
+  formatter(
+    "span",
+    style = function(x) style(
+      display = "inline-block", 
+      `border-radius` = "4px",
+      `padding-left` = "4px", #`margin-right` = "20px", `padding-left` = "0px", #
+      # padding = "0 0px",
+      `background-color` = csscolor(color)
+      ,
+      width = percent(
+        fun(as.numeric(x), ...)
+      )
+    )
+  )
+}
+```
 
 ```{r}
 full_join(
@@ -214,17 +398,51 @@ full_join(
   df_deaths,
   by = "player"
 ) %>%
-  mutate(
-    kd_ratio = round(kills / deaths, 2)
+  full_join(
+    df_time_played %>%
+      select(player, total_time_played),
+    by = "player"
   ) %>%
-  arrange(-kd_ratio) %>%
+  mutate(
+    kd_ratio = round(kills / deaths, 2),
+    kills_per_minute = round(kills * 60 / total_time_played, 2)
+  ) %>%
+  mutate(
+    total_time_played = paste0(
+      sprintf("%02d", as.numeric(total_time_played) %/% 60),
+      "m",
+      sprintf("%02d", trunc(as.numeric(total_time_played)) %% 60),
+      "s"
+    )
+  ) %>%
+  arrange(-kills_per_minute) %>%
   
-  DT::datatable(
+  select(
+    player,
+    kills,
+    deaths,
+    kd_ratio,
+    kills_per_minute,
+    total_time_played
+  ) %>%
+  
+  formattable(list(
+    kills = left_color_bar("lightblue"),
+    deaths = left_color_bar("lightblue"),
+    kd_ratio = color_tile("transparent", "lightpink"),
+    kills_per_minute = color_tile("transparent", "lightpink")
+  )) %>%
+
+  formattable::as.datatable(
     # rownames = FALSE,
+    class = 'row-border hover',
     options = list(
       paging = FALSE
+      ,
+      columnDefs = list(list(className = 'dt-left dt-head-left', targets = "_all"))
     )
-  )
+  ) %>%
+  identity()
 ```
 
 ### <strong>Most kills</strong>
@@ -258,8 +476,11 @@ df_killers %>%
 
   DT::datatable(
     # rownames = FALSE,
+    class = 'row-border hover',
     options = list(
       paging = FALSE
+      ,
+      columnDefs = list(list(className = 'dt-left dt-head-left', targets = "_all"))
     )
   )
 ```
@@ -295,8 +516,11 @@ df_killers %>%
   
   DT::datatable(
     # rownames = FALSE,
+    class = 'row-border hover',
     options = list(
       paging = FALSE
+      ,
+      columnDefs = list(list(className = 'dt-left dt-head-left', targets = "_all"))
     )
   )
 ```
@@ -307,7 +531,10 @@ df_killers %>%
 df_killers %>%
   full_join(
     df_killers,
-    by = c("event_properties.victim" = "event_properties.killer", "event_properties.killer" = "event_properties.victim")
+    by = c(
+      "event_properties.victim" = "event_properties.killer",
+      "event_properties.killer" = "event_properties.victim"
+    )
   ) %>%
   mutate(
     # kills = coalesce(n.x, 0L),
@@ -351,13 +578,17 @@ df_killers %>%
 
 ```{r}
 df_knife_kills %>%
-  
   DT::datatable(
     rownames = FALSE,
+    class = 'row-border hover',
     options = list(
       paging = FALSE
+      ,
+      columnDefs = list(list(className = 'dt-left dt-head-left', targets = "_all"))
     )
-  )
+  ) %>%
+  
+  identity()
 ```
 
 ### <strong>Stats Globales (TEMP)</strong><br>Por el momento, incluye el warmup. En un futuro, sólo va a contar "el bueno". 
@@ -373,10 +604,39 @@ df_stats %>%
   
   DT::datatable(
     rownames = FALSE,
+    class = 'row-border hover',
     options = list(
       paging = FALSE
+      ,
+      columnDefs = list(list(className = 'dt-left dt-head-left', targets = "_all"))
     )
   )
 ```
+
+### <strong>Stats Globales</strong><br>DESACTUALIZADO 
+
+```{r}
+readRDS("dfg.Rds") %>%
+  
+  
+  formattable(list(
+    kills = left_color_bar("lightblue"),
+    deaths = left_color_bar("lightblue"),
+    kd_ratio = color_tile("transparent", "lightpink"),
+    kills_per_minute = color_tile("transparent", "lightpink")
+  )) %>%
+
+  formattable::as.datatable(
+    # rownames = FALSE,
+    class = 'row-border hover',
+    options = list(
+      paging = FALSE
+      ,
+      columnDefs = list(list(className = 'dt-left dt-head-left', targets = "_all"))
+      , scrollX = TRUE
+    )
+  )
+```
+
 
 
