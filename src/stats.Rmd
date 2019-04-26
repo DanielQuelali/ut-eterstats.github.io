@@ -55,7 +55,9 @@ raw_events <- get_raw_events(events_log)
 df_raw_data <- get_df_raw_data(raw_events)
 
 df_match_events <- get_df_match_events(df_raw_data)
+```
 
+```{r}
 df_time_played <- get_df_time_played(df_raw_data, df_match_events)
 
 df_match_players <- get_df_match_players(df_match_events, players_dict)
@@ -103,41 +105,3 @@ get_df_knife_kills(df_kill_events, df_match_players) %>%
   draw_knifeNkicks_stats()
 ```
 
-<!-- Not currently used -->
-
-### <strong>Stats Globales</strong><br>Capture The Flag 
-
-```{r}
-readRDS("dfg.Rds") %>%
-  
-  arrange(-win_rate, -team_flags_balance, -match_draw) %>%
-  mutate(
-    rank = row_number()
-  ) %>%
-  select(rank, everything()) %>%
-  
-  rename(
-    wins = match_won,
-    losses = match_lost,
-    draws = match_draw,
-    match_played = match_played
-  ) %>%
-  
-  formattable(list(
-    # win_rate = color_tile("transparent", "lightgreen"),
-    win_rate = color_tile("lightpink", "#98FB98"),
-    flags_balance = left_color_bar("lightblue"),
-    match_played = left_color_bar("lightblue")
-  )) %>%
-  
-  formattable::as.datatable(
-    rownames = FALSE,
-    class = 'row-border hover',
-    options = list(
-      paging = FALSE
-      ,
-      columnDefs = list(list(className = 'dt-left dt-head-left', targets = "_all"))
-      , scrollX = TRUE
-    )
-  )
-```
