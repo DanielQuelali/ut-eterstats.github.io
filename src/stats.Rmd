@@ -68,7 +68,7 @@ df_kill_events <- get_df_kill_events(df_match_events)
 m_killer_victim <- get_m_killer_victim(df_kill_events, df_match_players)
 ```
 
-### <strong>Timevis</strong><br/>Map: `r df_match_events %>% pull(event_properties.map_name) %>% last()`
+### <strong>Timevis</strong><br/>Map: `r df_raw_data %>% pull(event_properties.map_name) %>% last()`
 
 ```{r}
 draw_timevis(
