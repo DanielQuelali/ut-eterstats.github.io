@@ -34,7 +34,7 @@ get_df_flags_won <- function(df_match_events) {
 get_df_sessions <- function(df_raw_data, df_flags_won) {
   df_raw_data %>%
     group_by(
-      event_properties.player,
+      player_guid,
       player_session_id
     ) %>%
     summarise(
@@ -104,14 +104,8 @@ get_df_time_played <- function(df_raw_data, df_match_events) {
       )
     ) %>%
     filter(player_session_id > 0) %>%
-    mutate(
-      player = map_chr(event_properties.player, ~players_dict[.x])
-    ) %>%
-    # mutate(
-    #   session_interval = lubridate::interval(session_start, session_end)
-    # ) %>%
     group_by(
-      player
+      player_guid
     ) %>%
     summarise_at(
       vars(starts_with("round"), flags_won, flags_lost),
@@ -123,7 +117,7 @@ get_df_time_played <- function(df_raw_data, df_match_events) {
       total_time_played = round_1_time_played + round_2_time_played
     ) %>%
     select(
-      player,
+      player_guid,
       round_1_time_played,
       round_2_time_played,
       total_time_played,
@@ -258,14 +252,6 @@ get_df_kills_stats <- function(df_match_events, df_time_played) {
 
 ## TODO: Get rid of df_match_events dependency 
 get_df_match_stats <- function(df_match_events, df_time_played, df_match_players) {
-  ## Ugly fix until I have player_guid in df_time_played
-  df_time_played <- df_time_played %>%
-    inner_join(
-      df_match_players,
-      by = c('player' = 'player_name')
-    )
-  
-  
   df_raw_match_stats <- inner_join(
     get_df_kills_stats(df_match_events, df_time_played),
     get_df_flag_stats(df_match_events, df_time_played),
