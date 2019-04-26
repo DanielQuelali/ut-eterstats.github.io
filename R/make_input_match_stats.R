@@ -94,14 +94,13 @@ get_df_time_played <- function(df_raw_data, df_match_events) {
   
   df_time_played <- df_sessions %>%
     mutate(
-      session_interval = lubridate::interval(session_start, session_end),
       round_1_time_played = get_time_played(
         rounds_interval[1],
-        session_interval
+        lubridate::interval(session_start, session_end)
       ),
       round_2_time_played = get_time_played(
         rounds_interval[2],
-        session_interval
+        lubridate::interval(session_start, session_end)
       )
     ) %>%
     filter(player_session_id > 0) %>%
