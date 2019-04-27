@@ -153,6 +153,19 @@ get_df_player_team_flags <- function(df_time_played) {
 
 # Intermediate results ----------------------------------------------------
 
+add_player_capture_attemps <- function(df, df_flag_events) {
+  df %>%
+    left_join(
+      df_flag_events %>%
+        filter(event_type %in% c('flag_dropped', 'flag_capture_time')) %>%
+        distinct(player_guid, round, flag_team, flag_id) %>%
+        group_by(player_guid) %>%
+        summarize(flag_capture_attempts = n()) %>%
+        ungroup(),
+      by = 'player_guid'
+    )
+}
+
 get_df_flag_stats <- function(
   df_flag_events,
   df_time_played,
@@ -173,9 +186,7 @@ get_df_flag_stats <- function(
       key = event_type,
       value = n
     ) %>%
-    mutate(
-      flag_capture_attempt = flag_dropped + flag_capture_time
-    ) %>%
+    add_player_capture_attemps(df_flag_events) %>%
     left_join(
       get_df_player_team_flags(df_time_played),
       by = 'player_guid'
@@ -188,7 +199,15 @@ get_df_flag_stats <- function(
         TRUE ~ 'LOSE'
       )
     ) %>%
-    select(-flag_dropped)
+    select(
+      player_guid,
+      flags_captured = flag_capture_time,
+      flags_returned = flag_returned,
+      flag_capture_attempts,
+      flags_won,
+      flags_lost,
+      result
+    )
 }
 
 get_df_kills_stats <- function(
