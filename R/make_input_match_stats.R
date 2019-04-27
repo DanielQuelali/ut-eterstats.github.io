@@ -183,12 +183,14 @@ add_player_flag_assists <- function(df, df_flag_events) {
           round,
           flag_team,
           flag_id,
+          flag_capturer_guid = player_guid,
           flag_capture_time_start,
           flag_capture_time_end = asctime
         ),
       by = c('round', 'flag_team', 'flag_id')
     ) %>%
     filter(
+      player_guid != flag_capturer_guid,
       asctime >= flag_capture_time_start,
       asctime <= flag_capture_time_end
     ) %>%
