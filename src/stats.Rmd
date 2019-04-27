@@ -80,7 +80,12 @@ draw_timevis(
 ### <strong>Match Stats</strong>
 
 ```{r}
-get_df_match_stats(df_match_events, df_time_played, df_match_players) %>%
+get_df_match_stats(
+  df_kill_events,
+  df_flag_events,
+  df_time_played,
+  df_match_players
+) %>%
   draw_match_stats()
 ```
 
