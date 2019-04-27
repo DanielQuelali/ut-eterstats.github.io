@@ -91,7 +91,7 @@ draw_match_stats <- function(df_match_stats) {
       deaths = left_color_bar("lightblue"),
       kd_ratio = color_tile("transparent", "lightpink"),
       kills_per_minute = color_tile("transparent", "lightpink"),
-      resultado = formatter(
+      result = formatter(
         "span",
         style = x ~ style(
           color = case_when(
