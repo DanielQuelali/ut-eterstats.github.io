@@ -172,20 +172,17 @@ get_df_player_team_flags <- function(df_time_played) {
 
 # Intermediate results ----------------------------------------------------
 
-get_df_flag_stats <- function(df_match_events, df_time_played) {
-  df_match_events %>%
-    distinct(player_guid) %>%
-    
-    ## Full join para traer a todos los players,
-    ## incluso los que no capturaron ninguna bandera
-    full_join(
+get_df_flag_stats <- function(df_match_events, df_time_played, df_match_players) {
+  df_match_players %>%
+    select(player_guid) %>%
+    left_join(
       df_match_events %>%
         filter(grepl('flag', event_type), event_type != 'flag_capture_time') %>%
         count(event_type, player_guid) %>%
         ungroup(),
       by = 'player_guid'
     ) %>%
-    
+    filter(!is.na(event_type)) %>%
     complete(event_type, player_guid, fill = list(n = 0L)) %>%
     
     spread(
@@ -254,7 +251,7 @@ get_df_kills_stats <- function(df_match_events, df_time_played) {
 get_df_match_stats <- function(df_match_events, df_time_played, df_match_players) {
   df_raw_match_stats <- inner_join(
     get_df_kills_stats(df_match_events, df_time_played),
-    get_df_flag_stats(df_match_events, df_time_played),
+    get_df_flag_stats(df_match_events, df_time_played, df_match_players),
     by = 'player_guid'
   )
   
