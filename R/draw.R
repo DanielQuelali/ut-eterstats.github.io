@@ -66,7 +66,7 @@ draw_match_stats <- function(df_match_stats) {
         th(rowspan = 2, 'Player'),
         th(rowspan = 2, 'Playtime', style = style_left_border),
         th(colspan = 4, 'KDA', style = style_left_border),
-        th(colspan = 3, 'Flags', style = style_left_border),
+        th(colspan = 4, 'Flags', style = style_left_border),
         th(colspan = 2, 'Team Flags', style = style_left_border),
         th(rowspan = 2, 'Match Result', style = style_left_border)
       ),
@@ -76,6 +76,7 @@ draw_match_stats <- function(df_match_stats) {
         th('KD Ratio'),
         th('Kills per Minute'),
         th('Captured', style = style_left_border),
+        th('Assisted'),
         th('Returned'),
         th('Dropped'),
         th('Won', style = style_left_border),
