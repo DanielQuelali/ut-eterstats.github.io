@@ -146,8 +146,8 @@ get_df_player_team_flags <- function(df_time_played) {
   df_time_played %>%
     select(
       player_guid,
-      banderas_ganadas = flags_won,
-      banderas_perdidas = flags_lost
+      flags_won,
+      flags_lost
     )
 }
 
@@ -174,12 +174,7 @@ get_df_flag_stats <- function(
       value = n
     ) %>%
     mutate(
-      banderas_enemigas_tocadas = flag_dropped + flag_capture_time
-    ) %>%
-    rename(
-      banderas_capturadas = flag_capture_time,
-      banderas_droppeadas = flag_dropped,
-      banderas_recuperadas = flag_returned
+      flag_capture_attempt = flag_dropped + flag_capture_time
     ) %>%
     left_join(
       get_df_player_team_flags(df_time_played),
@@ -187,13 +182,13 @@ get_df_flag_stats <- function(
     ) %>%
     
     mutate(
-      resultado = case_when(
-        banderas_ganadas > banderas_perdidas ~ 'WIN',
-        banderas_ganadas == banderas_perdidas ~ 'DRAW',
+      result = case_when(
+        flags_won > flags_lost ~ 'WIN',
+        flags_won == flags_lost ~ 'DRAW',
         TRUE ~ 'LOSE'
       )
     ) %>%
-    select(-banderas_droppeadas)
+    select(-flag_dropped)
 }
 
 get_df_kills_stats <- function(
