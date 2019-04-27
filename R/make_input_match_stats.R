@@ -35,26 +35,19 @@ get_df_sessions <- function(df_raw_data, df_flags_won) {
   df_raw_data %>%
     group_by(
       player_guid,
-      player_session_id
+      player_session_id,
+      player_team
     ) %>%
     summarise(
-      player_team = stats_mode(player_team),
       session_start = min(asctime),
-      session_end = coalesce(
-        asctime[
-          if_else(
-            any(grepl("ClientDisconnect", message)),
-            which.max(grepl("ClientDisconnect", message)),
-            NA_integer_
-          )
-          ],
-        max(asctime)
-      )
+      session_end = max(asctime)
     ) %>%
+    group_by(player_guid) %>%
     mutate(
-      session_end = coalesce(session_end, lead(session_start))
+      session_end = coalesce(lead(session_start), session_end)
     ) %>%
     ungroup() %>%
+    filter(player_team %in% c('red', 'blue')) %>%
     mutate(
       # session_end = coalesce(session_end, max(session_end, na.rm = TRUE))
       # ,

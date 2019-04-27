@@ -53,18 +53,27 @@ add_player_data <- function(df, players_dict) {
     # DEBUG:
     # select(event_id, asctime, message, event_type, event_properties.player, round, round_time) %>%
 
-    group_by(
-      event_properties.player
-    ) %>%
+    group_by(player_guid) %>%
     mutate(
-      player_session_id = cumsum(grepl("ClientBegin", message)),
-      player_team = str_extract(message, "(?<=team )\\w+")
+      player_team = if_else(
+        event_type %in% 'player_disconnected',
+        'no_team',
+        str_extract(message, "(?<=team )\\w+")
+      )
       # ,
       # player_name = str_extract(message, "(?<=Player \\d\\d? )\\w+")
     ) %>%
     fill(player_team) %>%
     ungroup() %>%
-    arrange(event_id)
+    arrange(event_id) %>%
+    group_by(player_guid) %>%
+    mutate(
+      player_session_id = cumsum(
+        coalesce(player_team, 'no_team') !=
+          coalesce(lag(player_team), 'no_team')
+      )
+    ) %>%
+    ungroup()
   # %>%
   #   mutate(
   #     player_name = coalesce(map_chr(player_guid, ~players_dict[.x]), player_name)
