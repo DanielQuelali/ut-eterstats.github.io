@@ -224,8 +224,8 @@ get_df_flag_stats <- function(
         ungroup(),
       by = 'player_guid'
     ) %>%
-    filter(!is.na(event_type)) %>%
     complete(event_type, player_guid, fill = list(n = 0L)) %>%
+    filter(!is.na(event_type)) %>%
     
     spread(
       key = event_type,
