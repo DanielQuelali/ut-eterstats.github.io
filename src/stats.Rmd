@@ -36,6 +36,7 @@ source("../R/make_base.R")
 source("../R/make_match_events.R")
 source("../R/make_input_timevis.R")
 source("../R/make_input_match_stats.R")
+source("../R/make_input_kill_details.R")
 source("../R/make_input_heatmap.R")
 source("../R/make_input_parenthood.R")
 source("../R/make_input_special_kills.R")
@@ -88,6 +89,16 @@ get_df_match_stats(
 ) %>%
   draw_match_stats()
 ```
+
+### <strong>Kill details</strong>
+
+```{r}
+get_df_kill_details(df_kill_events, df_spawns) %>%
+  draw_datatable(
+    rownames = FALSE
+  )
+```
+
 
 ### <strong>Parenthood</strong>
 
