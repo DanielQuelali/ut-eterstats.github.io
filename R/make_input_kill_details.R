@@ -10,8 +10,8 @@ get_player_spawn_id <- function(player_id, asctime, df_spawns) {
   )
 }
 
-get_df_max_streak <- function(df_kill_events, df_spawns) {
-  df_kill_events %>%
+get_df_max_streak <- function(df_kill_events, df_spawns, df_match_players) {
+  df_max_streak <- df_kill_events %>%
     mutate(
       killer_spawn_id = get_player_spawn_id(killer_guid, asctime, df_spawns)
     ) %>%
@@ -20,12 +20,19 @@ get_df_max_streak <- function(df_kill_events, df_spawns) {
     summarize(
       max_streak = max(n)
     ) %>%
-    ungroup() %>%
+    ungroup()
+  
+  df_match_players %>%
+    left_join(
+      df_max_streak,
+      by = c('player_guid' = 'killer_guid')
+    ) %>%
+    select(-player_name) %>%
     arrange(-max_streak)
 }
 
-get_df_multikill <- function(df_kill_events) {
-  df_kill_events %>%
+get_df_multikill <- function(df_kill_events, df_match_players) {
+  df_multikill <- df_kill_events %>%
     group_by(killer_guid) %>%
     mutate(
       diff_time = (asctime - lag(asctime)) %>% as.numeric(unit = 'secs'),
@@ -40,13 +47,22 @@ get_df_multikill <- function(df_kill_events) {
     mutate(
       mk = if_else(n == 3, 'MultiKill', 'MonsterKill')
     ) %>%
-    select(-n) %>%
-    spread(mk, nn, fill = 0)
+    select(-n)
+  
+  df_match_players %>%
+    left_join(
+      df_multikill,
+      by = c('player_guid' = 'killer_guid')
+    ) %>%
+    select(-player_name) %>%
+    complete(mk, player_guid, fill = list(nn = 0)) %>%
+    spread(mk, nn)
 }
 
-get_df_weapons_used <- function(df_kill_events) {
-  df_kill_events %>%
+get_df_weapons_used <- function(df_kill_events, df_match_players) {
+  df_weapons_used <- df_kill_events %>%
     filter(!is_team_kill) %>%
+    filter(!is.na(killer_guid)) %>%
     count(killer_guid, death_cause) %>%
     group_by(death_cause) %>%
     mutate(
@@ -59,30 +75,35 @@ get_df_weapons_used <- function(df_kill_events) {
       death_cause = death_cause %>% str_replace('UT_MOD_', '') %>% factor() %>% fct_inorder()
     ) %>%
     select(killer_guid, death_cause, n) %>%
-    spread(death_cause, n, fill = 0)  
-}
-
-get_df_kill_details <- function(df_kill_events, df_spawns) {
+    spread(death_cause, n, fill = 0)
+  
   df_match_players %>%
     left_join(
-      get_df_max_streak(df_kill_events, df_spawns),
+      df_weapons_used,
       by = c('player_guid' = 'killer_guid')
     ) %>%
+    select(-player_name)
+}
+
+get_df_kill_details <- function(df_kill_events, df_spawns, df_match_players) {
+  df_match_players %>%
     left_join(
-      get_df_multikill(df_kill_events),
-      by = c('player_guid' = 'killer_guid')
+      get_df_max_streak(df_kill_events, df_spawns, df_match_players),
+      by = 'player_guid'
     ) %>%
     left_join(
-      get_df_weapons_used(df_kill_events),
-      by = c('player_guid' = 'killer_guid')
+      get_df_multikill(df_kill_events, df_match_players),
+      by = 'player_guid'
+    ) %>%
+    left_join(
+      get_df_weapons_used(df_kill_events, df_match_players),
+      by = 'player_guid'
     ) %>%
     select(-player_guid) %>%
     replace_na(
       replace = list(
-        max_streak = 0,
-        MonsterKill = 0,
-        MultiKill = 0
+        max_streak = 0
       )
     ) %>%
-    arrange(-max_streak, -MonsterKill, -MultiKill)
+    arrange(-max_streak)
 }

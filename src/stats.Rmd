@@ -93,7 +93,7 @@ get_df_match_stats(
 ### <strong>Kill details</strong>
 
 ```{r}
-get_df_kill_details(df_kill_events, df_spawns) %>%
+get_df_kill_details(df_kill_events, df_spawns, df_match_players) %>%
   draw_datatable(
     rownames = FALSE
   )
