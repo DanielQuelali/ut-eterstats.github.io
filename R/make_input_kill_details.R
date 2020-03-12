@@ -6,7 +6,8 @@ get_player_spawn_id <- function(player_id, asctime, df_spawns) {
       df_spawns$spawning_player_id == .x &
         df_spawns$player_spawn_start <= .y
       ] %>%
-      max()
+      #TODO: Revisar esto, antes era max y se rompio
+      last()
   )
 }
 
@@ -33,6 +34,7 @@ get_df_max_streak <- function(df_kill_events, df_spawns, df_match_players) {
 
 get_df_multikill <- function(df_kill_events, df_match_players) {
   df_multikill <- df_kill_events %>%
+    filter(!is_team_kill) %>%
     group_by(killer_guid) %>%
     mutate(
       diff_time = (asctime - lag(asctime)) %>% as.numeric(unit = 'secs'),
@@ -47,7 +49,10 @@ get_df_multikill <- function(df_kill_events, df_match_players) {
     mutate(
       mk = if_else(n == 3, 'MultiKill', 'MonsterKill')
     ) %>%
-    select(-n)
+    select(-n) %>%
+    group_by(killer_guid, mk) %>%
+    summarize_at("nn", sum) %>%
+    ungroup()
   
   df_match_players %>%
     left_join(
@@ -55,7 +60,7 @@ get_df_multikill <- function(df_kill_events, df_match_players) {
       by = c('player_guid' = 'killer_guid')
     ) %>%
     select(-player_name) %>%
-    complete(mk, player_guid, fill = list(nn = 0)) %>%
+    complete(player_guid, mk = c('MultiKill', 'MonsterKill'), fill = list(nn = 0)) %>%
     spread(mk, nn)
 }
 
@@ -105,5 +110,5 @@ get_df_kill_details <- function(df_kill_events, df_spawns, df_match_players) {
         max_streak = 0
       )
     ) %>%
-    arrange(-max_streak)
+    arrange(-max_streak, -MonsterKill, -MultiKill)
 }

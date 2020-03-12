@@ -82,7 +82,10 @@ get_df_flag_events <- function(df_match_events) {
     filter(grepl('flag', event_type), event_type != 'flag_captured') %>%
     
     mutate(
-      capture_time_secs = as.numeric(event_properties.capture_time_ms) / 1000
+      capture_time_secs = if(
+        'event_properties.capture_time_ms' %in% names(.))
+        as.numeric(event_properties.capture_time_ms) / 1000
+        else 0
     ) %>%
     
     ## Flag team
@@ -153,12 +156,23 @@ get_df_spawns <- function(df_match_events) {
         player_spawn_end
       )
     ) %>%
-    arrange(event_id) %>%
+    arrange(asctime, event_id) %>%
     group_by(spawning_player_id) %>%
     mutate(
       player_spawn_id = cumsum(coalesce(event_type, '') == 'player_spawn')
     ) %>%
     ungroup() %>%
+    select(
+      spawning_player_id,
+      player_spawn_id,
+      player_spawn_start,
+      player_spawn_end,
+      player_team
+    ) %>%
+    filter(
+      player_team %in% c('red', 'blue')
+    ) %>%
+    # filter(!is.na(player_spawn_start), !is.na(player_spawn_end)) %>%
     # filter(spawning_player_id == '3B1D7F2EA942DAD5C2AC7F828A9B33B4') %>%
     # filter(spawning_player_id == 'C6BB082FCB688977AA66D20ABA6086B2') %>%
     group_by(
@@ -171,10 +185,8 @@ get_df_spawns <- function(df_match_events) {
       player_spawn_end = min(player_spawn_end, na.rm = TRUE),
       player_team = first(player_team)
     ) %>%
-    filter(
-      player_team %in% c('red', 'blue')
-    ) %>%
-    ungroup()
+    ungroup() %>%
+    arrange(spawning_player_id, player_spawn_id)
 }
 
 # Level 2 -----------------------------------------------------------------

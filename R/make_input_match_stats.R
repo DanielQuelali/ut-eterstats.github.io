@@ -231,6 +231,11 @@ get_df_flag_stats <- function(
       key = event_type,
       value = n
     ) %>%
+    
+    mutate(
+      flag_capture_time = if('flag_capture_time' %in% names(.)) flag_capture_time else 0
+    ) %>%
+    
     add_player_capture_attemps(df_flag_events) %>%
     add_player_flag_assists(df_flag_events) %>%
     left_join(
@@ -279,9 +284,13 @@ get_df_kills_stats <- function(
     )
   
   df_raw_kill_stats %>%
+    replace_na(list(
+      kills = 0L,
+      deaths = 0L
+    )) %>%
     mutate(
-      kills = coalesce(kills, 0L),
-      kd_ratio = round(kills / deaths, 2),
+      # kills = coalesce(kills, 0L),
+      kd_ratio = round(kills / deaths, 2) %>% coalesce(0),
       kills_per_minute = round(kills * 60 / total_time_played, 2)
     ) %>%
     

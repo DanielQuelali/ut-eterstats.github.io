@@ -11,6 +11,11 @@ get_m_killer_victim <- function(df_kill_events, df_match_players) {
       victim_name,
       kills
     ) %>%
+    group_by(killer_name, victim_name) %>%
+    summarize(
+      kills = sum(kills)
+    ) %>%
+    ungroup() %>%
     spread(victim_name, kills) %>%
     {
       my_row_names <- pull(., killer_name)
